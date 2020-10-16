@@ -10,7 +10,7 @@
 -author("nandakumar").
 
 %% API
--export([init/0]).
+-export([init/0,get/0]).
 
 -define(HTTP_TIMEOUT_MSEC, 10000).
 -define(HTTP_CONNECT_TIMEOUT_MSEC, 100000).
@@ -45,21 +45,43 @@ loop(Acc) ->
 
 get_meaning(Word1,Acc)->
     try
-%%        HTTPOptions = [{timeout, ?HTTP_TIMEOUT_MSEC}, {connect_timeout, ?HTTP_CONNECT_TIMEOUT_MSEC}],
-%%        Url = "http://translate.googleapis.com/translate_a/single?client=gtx&sl=gu&tl=ta&dt=t&dj=1&q="++Word1,
-%%        Body = jiffy:encode(#{}),
-%%        {ok, {{_, _, _}, _, RespBody}} = httpc:request(post, {Url, [], ?TYPE, iolist_to_binary(Body)}, HTTPOptions, []),
-%%
-%%        RespMap = jiffy:decode(RespBody, [return_maps]),
-%%        case maps:get(<<"sentences">>,RespMap,undefined)of
-%%            undefined -> ok;
-%%            Data ->
-%%                Data1 = lists:nth(1,Data),
-%%                Trans = maps:get(<<"trans">>,Data1),
-%%                io:format("~n Trans ~p ",[Trans])
-%%                gen_server:cast(words_keeper,{new_word,{}}),
-%%        end
-        maps:put(Word1, {Word1,Word1}, Acc)
+        HTTPOptions = [{timeout, ?HTTP_TIMEOUT_MSEC}, {connect_timeout, ?HTTP_CONNECT_TIMEOUT_MSEC}],
+        Url = "http://translate.googleapis.com/translate_a/single?client=gtx&sl=gu&tl=ta&dt=t&dj=1&q="++Word1,
+        Body = jiffy:encode(#{}),
+        {ok, {{_, _, _}, _, RespBody}} = httpc:request(post, {Url, [], ?TYPE, iolist_to_binary(Body)}, HTTPOptions, []),
+
+        RespMap = jiffy:decode(RespBody, [return_maps]),
+        Trans =
+            case maps:get(<<"sentences">>,RespMap,undefined)of
+            undefined -> ok;
+            Data ->
+                Data1 = lists:nth(1,Data),
+                maps:get(<<"trans">>,Data1)
+        end,
+        maps:put(Word1, {Word1,Trans}, Acc)
+    catch
+        _S:E  -> io:format("Error")
+    end.
+
+
+get()->
+    try
+        HTTPOptions = [{timeout, ?HTTP_TIMEOUT_MSEC}, {connect_timeout, ?HTTP_CONNECT_TIMEOUT_MSEC}],
+        Url = "http://translate.googleapis.com/translate_a/single?client=gtx&sl=gu&tl=ta&dt=t&dj=1&q=Love",
+        Body = jiffy:encode(#{}),
+        {ok, {{_, _, _}, _, RespBody}} = httpc:request(post, {Url, [], ?TYPE, iolist_to_binary(Body)}, HTTPOptions, []),
+
+        RespMap = jiffy:decode(RespBody, [return_maps]),
+        io:format("~n RespMap ~p ",[RespMap]),
+        case maps:get(<<"sentences">>,RespMap,undefined)of
+            undefined -> ok;
+            Data ->
+                Data1 = lists:nth(1,Data),
+                Trans = maps:get(<<"trans">>,Data1),
+                db:insert_one(#{word=><<"LOVE">>,trans => Trans}),
+
+                io:format("~n Trans ~p ",[Trans])
+        end
     catch
         _S:E  -> io:format("Error")
     end.

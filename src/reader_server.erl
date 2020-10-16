@@ -16,11 +16,25 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-    code_change/3,start/0, start_reading/0]).
+    code_change/3,start/0, start_reading/1]).
 
 -define(SERVER, ?MODULE).
 
--record(reader_server_state, {}).
+-record(reader_server_state, {details=[]}).
+-define(DEFAULT_PATH,[
+    "books/a_doll's_house.txt",
+    "books/anthem.txt",
+    "books/beowulf.txt",
+    "books/frankenstein.txt",
+    "books/pride_and_prejudice.txt",
+    "books/the_scarlet_letter.txt",
+
+    "books/book.txt",
+    "books/book1.txt",
+    "books/book2.txt",
+    "books/book3.txt"
+
+    ]).
 
 %%%===================================================================
 %%% API
@@ -56,7 +70,6 @@ init([]) ->
     {stop, Reason :: term(), Reply :: term(), NewState :: #reader_server_state{}} |
     {stop, Reason :: term(), NewState :: #reader_server_state{}}).
 handle_call(_A, _From, State = #reader_server_state{}) ->
-    start_reading(),
     {reply, ok, State}.
 
 %% @private
@@ -67,8 +80,20 @@ handle_call(_A, _From, State = #reader_server_state{}) ->
     {stop, Reason :: term(), NewState :: #reader_server_state{}}).
 
 handle_cast(start_read, State = #reader_server_state{}) ->
-    start_reading(),
-    {noreply, State}.
+    gen_server:cast(?SERVER, {start_read, ?DEFAULT_PATH}),
+    {noreply, State};
+
+handle_cast({start_read,PATH}, State = #reader_server_state{}) ->
+    start_reading(PATH),
+    {noreply, State};
+
+handle_cast({update_state,NewSuccessDetails}, State = #reader_server_state{}) ->
+    #reader_server_state{
+        details = SuccessDetails
+    } = State,
+    io:format("~n SuccessDetails ~p ",[SuccessDetails]),
+    {noreply, State#reader_server_state{details = SuccessDetails ++ [NewSuccessDetails] }}.
+
 
 %% @private
 %% @doc Handling all non call/cast messages
@@ -102,16 +127,28 @@ code_change(_OldVsn, State = #reader_server_state{}, _Extra) ->
 %%%===================================================================
 
 start()->
-    gen_server:cast(?SERVER ,start_read).
+    gen_server:cast(?SERVER ,start_read),
+    ok.
 
-start_reading()->
-    % open the file and getting the 'Device'
-    case open_file() of
-        not_found -> ok;
-        Device ->
-            ListOfPids = create_workers(50),
-            read_lines(Device, ListOfPids, 0)
-    end.
+start_reading(PathList) ->
+    Result = lists:foldl(
+        fun(Path, Acc) ->
+            case open_file(Path) of
+                not_found -> [];
+                Device ->
+                    AllWorkers = create_workers(50),
+                    read_lines(Device, AllWorkers, 0),
+
+                    % lets wait fo the worker responses
+                    ResultWords = util:waiting_response(#{}, length(AllWorkers)),
+                    ResultWords1 = maps:keys(ResultWords),
+                    gen_server:cast(translator_server, {new_words, ResultWords1}),
+                    ResultWordsCount = length(ResultWords1),
+                    io:format("~n Reader : ~p Words collected ", [ResultWordsCount]),
+                    Acc ++ [{Path, ResultWordsCount}]
+            end
+        end, [], PathList),
+    gen_server:cast(?SERVER, {update_state, Result}).
 
 
 % this function will create N number of workers. Each worker will start with the function
@@ -121,8 +158,8 @@ create_workers(NumberOfWorkers) ->
 
 % This function will open the "big_text.txt" file and return the related Device. In Erlang this
 % Device is like a process in charge of reading our file
-open_file() ->
-    case (file:open("src/book.txt", read)) of
+open_file(Path) ->
+    case (file:open(Path, read)) of
         {ok, Device} -> Device ;
         _ -> not_found
     end.
@@ -150,14 +187,7 @@ read_lines(Device, AllWorkers, Counter) ->
                 fun(Pid) ->
                     Pid ! {self(), eof}
                 end, AllWorkers)
-    end,
-
-    % lets wait fo the worker responses
-    ResultWords = util:waiting_response(#{},length(AllWorkers)),
-    gen_server:cast(translator_server,{new_words, maps:keys(ResultWords)}),
-
-    io:format("~n Reader : ~p Words collected ",[length(maps:keys(ResultWords))]),
-    ok.
+    end.
 
 next_worker_pid(AllWorkerPIDs, Counter) ->
     Index = Counter rem length(AllWorkerPIDs),
